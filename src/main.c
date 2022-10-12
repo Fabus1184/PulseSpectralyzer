@@ -57,7 +57,6 @@ int main(void) {
 
     VIZ viz = viz_init();
 
-
     while (!viz_loop()) {
         if (1 == update) {
             pthread_mutex_lock(&mutex);
