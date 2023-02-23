@@ -1,7 +1,7 @@
 #include "../include/pulse.h"
 
 PULSE pulse_init(size_t rate) {
-    pa_sample_spec sample_spec = (pa_sample_spec) {
+    pa_sample_spec sample_spec = (pa_sample_spec){
             .format = PA_SAMPLE_FLOAT32,
             .channels = 1,
             .rate = (uint32_t) rate,
@@ -16,10 +16,17 @@ PULSE pulse_init(size_t rate) {
     };
 
     int32_t error[1];
-    pa_simple *simple = pa_simple_new(NULL, "PulseSpectralyzer", PA_STREAM_RECORD, NULL, "Music", &sample_spec, NULL,
-                                      &attributes, error);
+    pa_simple *simple = pa_simple_new(NULL,
+                                      "PulseSpectralyzer",
+                                      PA_STREAM_RECORD,
+                                      NULL,
+                                      "Music",
+                                      &sample_spec,
+                                      NULL,
+                                      &attributes,
+                                      error);
     CHECK(simple == NULL, pa_strerror, *error)
-    return (PULSE) {simple};
+    return (PULSE){simple};
 }
 
 size_t pulse_get_latency(PULSE pulse) {
