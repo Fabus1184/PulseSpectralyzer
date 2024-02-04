@@ -75,6 +75,11 @@ VIZ viz_init(void) {
     return (VIZ){window, renderer, font};
 }
 
+// logarithmic scaling
+float_t viz_scale(float_t value, float_t max) {
+    return (logf(10.0f * value + 1.0f) / logf(10.0f * max + 1.0f));
+}
+
 void viz_draw(VIZ viz, float_t *const data, const int32_t size) {
     const float_t step = ((float_t) size / (float_t) WIDTH);
     for (int32_t i = 0; i < WIDTH; ++i) {
@@ -98,7 +103,7 @@ void viz_draw(VIZ viz, float_t *const data, const int32_t size) {
                                   (float) i,
                                   (float) HEIGHT / 2,
                                   (float) i,
-                                  ((float) HEIGHT / 2) - (data[i] * ((float) (HEIGHT - 10) / 2))),
+                                  ((float) HEIGHT / 2) - (viz_scale(data[i], 1.0f) * ((float) (HEIGHT - 10) / 2))),
               SDL_GetError)
     }
 

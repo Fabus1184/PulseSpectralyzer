@@ -30,16 +30,15 @@ _Noreturn void *pulse_thread(void *thread_args) {
     size_t latency = pulse_get_latency(pulse);
     printf("Buffer size: %d, Latency: ~%0.3fms\n", RECORD_BUFFER_SIZE,
            ((float_t) latency / THOUSAND) + (DURATION * THOUSAND));
-    pthread_cleanup_push(pulse_quit, pulse)
-            while (1) {
-                pulse_read(pulse, args->record_buffer, (size_t) RECORD_BUFFER_SIZE);
-                pthread_mutex_lock(args->mutex);
-                execute_fftw(
-                        (FFTW) {args->record_buffer, RECORD_BUFFER_SIZE, args->draw_buffer, DRAW_BUFFER_SIZE,
-                                RATE});
-                *args->update = 1;
-                pthread_mutex_unlock(args->mutex);
-            }
+    pthread_cleanup_push(pulse_quit, pulse) while (1) {
+        pulse_read(pulse, args->record_buffer, (size_t) RECORD_BUFFER_SIZE);
+        pthread_mutex_lock(args->mutex);
+        execute_fftw(
+                (FFTW){args->record_buffer, RECORD_BUFFER_SIZE, args->draw_buffer, DRAW_BUFFER_SIZE,
+                       RATE});
+        *args->update = 1;
+        pthread_mutex_unlock(args->mutex);
+    }
     pthread_cleanup_pop(1);
 }
 
