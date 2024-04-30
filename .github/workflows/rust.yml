@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: install libs
-      run: sudo apt install -y alsa-base
+      run: sudo apt install -y alsa-base libasound2-dev
     - name: Build
       run: cargo build --verbose
     - name: Run tests
