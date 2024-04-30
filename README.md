@@ -1,8 +1,10 @@
 # PulseSpectralyzer
 
 Spectrum Analyzer for PulseAudio
+
 (actually, it should work with any audio source that [cpal](https://crates.io/crates/cpal) supports)
 
 ## Preview
 
-![preview](./preview.mp4)
+https://github.com/Fabus1184/PulseSpectralyzer/assets/43907020/d655ef55-fca6-464a-be6b-c4220231fa07
+
