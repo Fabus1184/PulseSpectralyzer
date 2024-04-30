@@ -1,3 +1,5 @@
+[![Rust](https://github.com/Fabus1184/PulseSpectralyzer/actions/workflows/rust.yml/badge.svg)](https://github.com/Fabus1184/PulseSpectralyzer/actions/workflows/rust.yml)
+
 # PulseSpectralyzer
 
 Spectrum Analyzer for PulseAudio
