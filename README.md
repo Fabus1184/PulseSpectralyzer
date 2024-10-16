@@ -9,4 +9,3 @@ Spectrum Analyzer for PulseAudio
 ## Preview
 
 https://github.com/Fabus1184/PulseSpectralyzer/assets/43907020/d655ef55-fca6-464a-be6b-c4220231fa07
-
