@@ -6,16 +6,29 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.82"
-atomic-option = "0.1.2"
+anyhow = "1.0.89"
 cpal = "0.15.3"
-egui = { git = "https://github.com/Fabus1184/egui.git/", branch = "feat-plot-lifetime" }
-eframe = { git = "https://github.com/Fabus1184/egui.git/", branch = "feat-plot-lifetime" }
-egui_plot = { git = "https://github.com/Fabus1184/egui.git/", branch = "feat-plot-lifetime" }
-log = "0.4.21"
+egui = "0.29.1"
+eframe = "0.29.1"
+egui_plot = "0.29.0"
+log = "0.4.22"
 ringbuffer = "0.15.0"
 rustfft = "6.2.0"
 simplelog = "0.12.2"
-#eframe = "0.27.2"
-#egui = "0.27.2"
-#egui_plot = "0.27.2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+nursery = { level = "deny", priority = 0 }
+pedantic = { level = "deny", priority = 1 }
+enum_glob_use = { level = "deny", priority = 2 }
+perf = { level = "deny", priority = 3 }
+style = { level = "deny", priority = 4 }
+unwrap_used = { level = "deny", priority = 5 }
+# These could be enabled in the future
+expect_used = { level = "allow", priority = 6 }
+many_single_char_names = { level = "allow", priority = 7 }
+cast_precision_loss = { level = "allow", priority = 8 }
+cast_possible_truncation = { level = "allow", priority = 9 }
+cast_sign_loss = { level = "allow", priority = 10 }
