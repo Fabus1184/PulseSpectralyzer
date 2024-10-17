@@ -9,9 +9,66 @@ use ringbuffer::AllocRingBuffer;
 use ringbuffer::RingBuffer;
 use rustfft::{num_complex::Complex, FftPlanner};
 
-use crate::Deinterleave;
-use crate::Lerp;
-use crate::LogScale;
+#[derive(Debug, Clone, Copy)]
+struct LogScale {
+    base: f64,
+}
+
+impl LogScale {
+    pub const fn new(base: f64) -> Self {
+        Self { base }
+    }
+
+    /// map a value from [0, 1] by the logaritmic scale in [0, 1]
+    pub fn map(self, x: f64) -> f64 {
+        (self.base.powf(x) - 1.0) / (self.base - 1.0)
+    }
+
+    /// reverse map a value from [0, 1] by the logaritmic scale in [0, 1]
+    pub fn map_inv(self, x: f64) -> f64 {
+        (self.base - 1.0).mul_add(x, 1.0).log(self.base)
+    }
+}
+
+trait Lerp<T> {
+    fn lerp(self, other: Self, t: T) -> Self;
+}
+
+impl Lerp<Self> for f32 {
+    fn lerp(self, other: Self, t: Self) -> Self {
+        self.mul_add(1.0 - t, other * t)
+    }
+}
+
+trait Deinterleave<T: Iterator<Item = I>, I> {
+    fn deinterleave(self, channels: usize) -> Vec<Vec<I>>;
+}
+
+impl<T: Iterator<Item = I>, I> Deinterleave<T, I> for T {
+    fn deinterleave(self, n: usize) -> Vec<Vec<I>> {
+        let mut channels = (0..n).map(|_| Vec::new()).collect::<Vec<_>>();
+
+        for (i, sample) in self.enumerate() {
+            channels[i % n].push(sample);
+        }
+
+        channels
+    }
+}
+
+#[allow(clippy::suboptimal_flops)] // Readability is more important
+fn blackman_harris<T: Iterator<Item = f32>>(n: usize, iterator: T) -> impl Iterator<Item = f32> {
+    let a = [0.35875, 0.48829, 0.14128, 0.01168];
+    let n = n as f32;
+
+    iterator.enumerate().map(move |(i, x)| {
+        let i = i as f32;
+        x * (a[0] - a[1] * (2.0 * std::f32::consts::PI * i / n).cos()
+            + a[2] * (4.0 * std::f32::consts::PI * i / n).cos()
+            - a[3] * (6.0 * std::f32::consts::PI * i / n).cos())
+    })
+}
+
 pub struct App {
     stream: Option<(cpal::Stream, cpal::StreamConfig, String)>,
     log_scale: LogScale,
@@ -49,19 +106,6 @@ impl App {
             self.log_scale.map(x) * f64::from(sample_rate) / 2.0 / 1_000.0
         )
     }
-}
-
-#[allow(clippy::suboptimal_flops)] // Readability is more important
-fn blackman_harris<T: Iterator<Item = f32>>(n: usize, iterator: T) -> impl Iterator<Item = f32> {
-    let a = [0.35875, 0.48829, 0.14128, 0.01168];
-    let n = n as f32;
-
-    iterator.enumerate().map(move |(i, x)| {
-        let i = i as f32;
-        x * (a[0] - a[1] * (2.0 * std::f32::consts::PI * i / n).cos()
-            + a[2] * (4.0 * std::f32::consts::PI * i / n).cos()
-            - a[3] * (6.0 * std::f32::consts::PI * i / n).cos())
-    })
 }
 
 impl eframe::App for App {
