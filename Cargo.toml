@@ -7,28 +7,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.89"
-cpal = "0.15.3"
-egui = "0.29.1"
-eframe = "0.29.1"
-egui_plot = "0.29.0"
+cpal = { version = "0.18.1", features = ["pipewire"] }
+egui = "0.34.3"
+eframe = "0.34.3"
+egui_plot = "0.35.0"
 log = "0.4.22"
-ringbuffer = "0.15.0"
+ringbuffer = "0.16.0"
 rustfft = "6.2.0"
 simplelog = "0.12.2"
-
-[lints.rust]
-unsafe_code = "forbid"
-
-[lints.clippy]
-nursery = { level = "deny", priority = 0 }
-pedantic = { level = "deny", priority = 1 }
-enum_glob_use = { level = "deny", priority = 2 }
-perf = { level = "deny", priority = 3 }
-style = { level = "deny", priority = 4 }
-unwrap_used = { level = "deny", priority = 5 }
-# These could be enabled in the future
-expect_used = { level = "allow", priority = 6 }
-many_single_char_names = { level = "allow", priority = 7 }
-cast_precision_loss = { level = "allow", priority = 8 }
-cast_possible_truncation = { level = "allow", priority = 9 }
-cast_sign_loss = { level = "allow", priority = 10 }

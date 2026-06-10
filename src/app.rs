@@ -2,43 +2,12 @@ use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use eframe::CreationContext;
-use egui::{ecolor::rgb_from_hsv, mutex::Mutex, Color32, Frame};
-use egui_plot::{Bar, BarChart, GridMark, Plot};
-use log::error;
+use egui::RichText;
+use egui::{mutex::Mutex, Frame};
+use egui_plot::{Bar, BarChart, Plot};
 use ringbuffer::AllocRingBuffer;
 use ringbuffer::RingBuffer;
 use rustfft::{num_complex::Complex, FftPlanner};
-
-#[derive(Debug, Clone, Copy)]
-struct LogScale {
-    base: f64,
-}
-
-impl LogScale {
-    pub const fn new(base: f64) -> Self {
-        Self { base }
-    }
-
-    /// map a value from [0, 1] by the logaritmic scale in [0, 1]
-    pub fn map(self, x: f64) -> f64 {
-        (self.base.powf(x) - 1.0) / (self.base - 1.0)
-    }
-
-    /// reverse map a value from [0, 1] by the logaritmic scale in [0, 1]
-    pub fn map_inv(self, x: f64) -> f64 {
-        (self.base - 1.0).mul_add(x, 1.0).log(self.base)
-    }
-}
-
-trait Lerp<T> {
-    fn lerp(self, other: Self, t: T) -> Self;
-}
-
-impl Lerp<Self> for f32 {
-    fn lerp(self, other: Self, t: Self) -> Self {
-        self.mul_add(1.0 - t, other * t)
-    }
-}
 
 trait Deinterleave<T: Iterator<Item = I>, I> {
     fn deinterleave(self, channels: usize) -> Vec<Vec<I>>;
@@ -69,92 +38,104 @@ fn blackman_harris<T: Iterator<Item = f32>>(n: usize, iterator: T) -> impl Itera
     })
 }
 
+enum State {
+    Stopped,
+    Selected {
+        device: cpal::Device,
+        config_ranges: Vec<cpal::SupportedStreamConfigRange>,
+        stream_config: cpal::StreamConfig,
+    },
+    Streaming {
+        device: cpal::Device,
+        config_ranges: Vec<cpal::SupportedStreamConfigRange>,
+        stream_config: cpal::StreamConfig,
+        data: Arc<Mutex<AllocRingBuffer<f32>>>,
+        stream: cpal::Stream,
+    },
+}
+
 pub struct App {
-    stream: Option<(cpal::Stream, cpal::StreamConfig, String)>,
-    log_scale: LogScale,
-    data: Arc<Mutex<AllocRingBuffer<f32>>>,
     devices: Vec<cpal::Device>,
-    device: Option<cpal::Device>,
+    state: State,
 }
 
 impl App {
-    pub fn new(_creation_context: &CreationContext) -> Self {
+    pub fn new(cc: &CreationContext) -> Self {
+        let hosts = cpal::available_hosts();
+        log::info!("Available audio hosts: {hosts:?}");
+
+        cc.egui_ctx.all_styles_mut(|style| {
+            style.spacing.item_spacing *= 2.0;
+            style.spacing.button_padding *= 2.0;
+        });
+
         Self {
-            stream: None,
-            log_scale: LogScale::new(5.0),
-            data: Arc::new(Mutex::new(AllocRingBuffer::new(1))),
-            devices: cpal::default_host()
-                .devices()
-                .expect("Could note get devices")
+            devices: hosts
+                .iter()
+                .filter_map(|host| cpal::host_from_id(*host).ok())
+                .filter_map(|host| host.devices().ok())
+                .flatten()
                 .collect(),
-            device: None,
+            state: State::Stopped,
+        }
+    }
+}
+
+struct XScale;
+impl XScale {
+    fn f_to_x(frequency: f64) -> f64 {
+        if frequency <= 200.0 {
+            frequency * 14.0
+        } else if frequency <= 20_000.0 {
+            (20_000f64.powi(2) - (frequency - 20_000.0).powi(2)).sqrt()
+        } else {
+            frequency
         }
     }
 
-    fn format_y(y: f64) -> String {
-        format!("{:.02} dB", y * 10.0)
-    }
-
-    fn format_x(&self, x: f64) -> String {
-        let sample_rate = self
-            .stream
-            .as_ref()
-            .map_or(0, |(_, config, _)| config.sample_rate.0);
-
-        format!(
-            "{:.02} kHz",
-            self.log_scale.map(x) * f64::from(sample_rate) / 2.0 / 1_000.0
-        )
+    fn x_to_f(x: f64) -> f64 {
+        if x <= 200.0 {
+            x / 14.0
+        } else if x <= 20_000.0 {
+            20_000.0 - (20_000f64.powi(2) - x.powi(2)).sqrt()
+        } else {
+            x
+        }
     }
 }
 
 impl eframe::App for App {
-    #[allow(clippy::too_many_lines)] // TODO: refactor
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal_top(|ui| {
-                Frame::group(ui.style()).show(ui, |ui| {
-                    let sample_rate = self
-                        .stream
-                        .as_ref()
-                        .map_or(0, |(_, config, _)| config.sample_rate.0);
-
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.inner_margin(10.0))
+            .show_inside(ui, |ui| {
+                ui.horizontal_top(|ui| {
                     Plot::new("spectrum")
-                        .width(ui.available_width() * 0.8)
-                        .include_y(3)
-                        .include_y(-3)
-                        .include_x(1.0)
+                        .width(ui.available_width() * 0.75)
+                        .include_y(100)
+                        .include_y(-100)
+                        .x_axis_label("Frequency")
+                        .y_axis_label("Amplitude (dBFS = dB Full Scale)")
                         .legend(egui_plot::Legend::default())
-                        .x_grid_spacer(|_| {
-                            (0..=sample_rate / 2)
-                                .step_by(2000)
-                                .map(|f| GridMark {
-                                    value: self
-                                        .log_scale
-                                        .map_inv(f64::from(f) / f64::from(sample_rate) * 2.0),
-                                    step_size: self
-                                        .log_scale
-                                        .map_inv(2000.0 / f64::from(sample_rate) * 2.0),
-                                })
-                                .collect()
+                        .x_axis_formatter(|mark, _| {
+                            format!("{:.01} kHz", XScale::x_to_f(mark.value) / 1000.0)
                         })
-                        .y_axis_formatter(|mark, _| Self::format_y(mark.value))
-                        .x_axis_formatter(|mark, _| self.format_x(mark.value))
-                        .label_formatter(|_, &egui_plot::PlotPoint { x, y }| {
-                            format!("{}\n{}", self.format_x(x), Self::format_y(y))
+                        .y_axis_formatter(|mark, _| {
+                            format!("{:.01} dB", (mark.value.abs() - 100.0))
                         })
+                        .x_grid_spacer(|grid| egui_plot::log_grid_spacer(5)(grid))
                         .show(ui, |plot| {
-                            let data = self.data.lock();
-
-                            let channels = match self.stream.as_ref() {
-                                Some((_, config, _)) if config.channels == 1 => 1,
-                                Some((_, config, _)) if config.channels == 2 => 2,
-                                _ => 1,
+                            let State::Streaming {
+                                ref data,
+                                ref stream_config,
+                                ..
+                            } = self.state
+                            else {
+                                return;
                             };
 
-                            let channels = data.iter().copied().deinterleave(channels);
-
-                            drop(data);
+                            let channels = { data.lock().iter().copied() }
+                                .deinterleave(stream_config.channels as usize);
 
                             for (channel, data) in channels.into_iter().enumerate() {
                                 let mut planner = FftPlanner::new();
@@ -168,135 +149,218 @@ impl eframe::App for App {
 
                                 buffer.truncate(buffer.len() / 2);
 
-                                let buffer = buffer
+                                let len = buffer.len() as f64;
+                                let bars = buffer
                                     .iter()
-                                    .map(|x| (x.re.abs() + 1.0).log10())
-                                    .collect::<Vec<_>>();
+                                    .enumerate()
+                                    .map(|(i, &iq)| {
+                                        let frequency =
+                                            i as f64 / len * stream_config.sample_rate as f64 / 2.0;
 
-                                let bars = (0..buffer.len().saturating_sub(1))
-                                    .map(|i| {
-                                        let x = self.log_scale.map(i as f64 / buffer.len() as f64);
-                                        let y = buffer[(x * buffer.len() as f64) as usize].lerp(
-                                            buffer[x.mul_add(buffer.len() as f64, 1.0) as usize],
-                                            x.fract() as f32,
+                                        let amplitude = (iq.norm() as f64) / len;
+                                        let decibel = 20.0 * amplitude.log10();
+                                        let y = decibel.clamp(-100.0, 0.0) + 100.0;
+
+                                        let [r, g, b] = egui::ecolor::rgb_from_hsv((
+                                            ((y as f32 / 100.0) + 0.3) % 1.0,
+                                            1.0,
+                                            1.0,
+                                        ))
+                                        .map(|c| (c * 255.0).round() as u8);
+
+                                        let x0 = XScale::f_to_x(frequency);
+                                        let x1 = XScale::f_to_x(
+                                            (i + 1) as f64 / len * stream_config.sample_rate as f64
+                                                / 2.0,
                                         );
 
-                                        // exponential scale
-                                        let y = ((y / 3.0 + 1.0).powi(5) - 1.0) / 7.0;
-
-                                        let [r, g, b] = rgb_from_hsv((0.7 + y / 3.0, 1.0, 1.0));
                                         Bar::new(
-                                            i as f64 / buffer.len() as f64,
-                                            f64::from(y) * -((channel % 2) as f64 - 0.5).signum(),
+                                            (x0 + x1) / 2.0,
+                                            if channel % 2 == 0 { y } else { -y },
                                         )
-                                        .fill(
-                                            Color32::from_rgb(
-                                                (r * 255.0) as u8,
-                                                (g * 255.0) as u8,
-                                                (b * 255.0) as u8,
-                                            ),
-                                        )
+                                        .fill(egui::Color32::from_rgb(r, g, b))
+                                        .width(x1 - x0)
                                     })
                                     .collect::<Vec<_>>();
 
                                 plot.bar_chart(
-                                    BarChart::new(bars)
-                                        .name(format!("Channel {}", channel + 1))
+                                    BarChart::new(format!("Channel {}", channel + 1), bars)
                                         .vertical()
-                                        .width(0.9 / buffer.len() as f64),
+                                        .element_formatter(Box::new(|bar, _| {
+                                            format!(
+                                                "{:.01} kHz: {:.01} dB",
+                                                XScale::x_to_f(bar.argument) / 1000.0,
+                                                bar.value.abs() - 100.0
+                                            )
+                                        })),
                                 );
                             }
                         });
-                });
 
-                Frame::group(ui.style()).show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        ui.heading("Stream settings");
+                    Frame::group(ui.style()).show(ui, |ui| {
+                        ui.take_available_width();
 
-                        egui::ComboBox::new("devices", "Device")
-                            .selected_text(self.device.as_ref().map_or_else(
-                                || String::from("None"),
-                                |device| device.name().expect("Could not get device name"),
-                            ))
-                            .show_ui(ui, |ui| {
-                                for device in &self.devices {
-                                    if ui
-                                        .selectable_label(
-                                            false,
-                                            device.name().expect("Could not get device name"),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.device = Some(device.clone());
+                        ui.vertical(|ui| {
+                            ui.heading("Device");
+
+                            egui::ComboBox::new("devices", "")
+                                .selected_text(match self.state {
+                                    State::Stopped => String::from("None"),
+                                    State::Selected { ref device, .. }
+                                    | State::Streaming { ref device, .. } => device.to_string(),
+                                })
+                                .show_ui(ui, |ui| {
+                                    for device in &self.devices {
+                                        if ui.selectable_label(false, device.to_string()).clicked()
+                                        {
+                                            let config_ranges = device
+                                                .supported_input_configs()
+                                                .expect("Could not get supported input configs")
+                                                .collect::<Vec<_>>();
+
+                                            self.state = State::Selected {
+                                                device: device.clone(),
+                                                config_ranges,
+                                                stream_config: device
+                                                    .default_input_config()
+                                                    .expect("Could not get default input config")
+                                                    .config(),
+                                            };
+                                        }
                                     }
-                                }
-                            });
+                                });
 
-                        match (self.stream.as_mut(), self.device.as_mut()) {
-                            (Some((_, config, ref name)), _) => {
-                                ui.label(format!("Streaming from: {name}"));
+                            ui.add_space(10.0);
 
-                                ui.label(format!("Sample rate: {} Hz", config.sample_rate.0));
-                                ui.label(format!("Channels: {}", config.channels));
-                                ui.label(format!("Buffer size: {:?}", config.buffer_size));
+                            ui.heading("Supported Configs");
+                            ui.label(
+                                RichText::new(
+                                    "Usually lower sample rates also work even if not listed here",
+                                )
+                                .size(10.0),
+                            );
 
-                                if ui.button("Stop").clicked() {
-                                    self.stream = None;
-                                    self.data.lock().clear();
-                                }
+                            if let State::Selected {
+                                ref config_ranges, ..
                             }
-                            (None, Some(ref device)) => {
-                                if ui.button("Start").clicked() {
-                                    let data = self.data.clone();
-
-                                    let config = device
-                                        .default_input_config()
-                                        .expect("Could not get default config")
-                                        .config();
-
-                                    self.stream = Some((
-                                        device
-                                            .build_input_stream(
-                                                &config,
-                                                move |samples: &[f32], _| {
-                                                    data.lock().extend(samples.iter().copied());
-                                                },
-                                                |error| {
-                                                    error!("Error in audio stream: {:?}", error);
-                                                },
-                                                None,
-                                            )
-                                            .expect("Could not build input stream"),
-                                        config.clone(),
-                                        device.name().expect("Could not get device name"),
-                                    ));
-
-                                    *self.data.lock() = AllocRingBuffer::new(
-                                        config.sample_rate.0 as usize / 5
-                                            * config.channels as usize,
+                            | State::Streaming {
+                                ref config_ranges, ..
+                            } = self.state
+                            {
+                                for &config_range in config_ranges {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "· {:>3} {}-{} kHz, {} channels, {} samples",
+                                            config_range.sample_format(),
+                                            config_range.min_sample_rate() as f32 / 1000.0,
+                                            config_range.max_sample_rate() as f32 / 1000.0,
+                                            config_range.channels(),
+                                            match config_range.buffer_size() {
+                                                cpal::SupportedBufferSize::Range { min, max } =>
+                                                    format!("{min}-{max}"),
+                                                cpal::SupportedBufferSize::Unknown =>
+                                                    String::from("?"),
+                                            }
+                                        ))
+                                        .monospace()
+                                        .size(10.0),
                                     );
                                 }
                             }
-                            (None, None) => {
-                                ui.add_enabled(false, egui::Button::new("Start"));
+
+                            ui.add_space(10.0);
+
+                            ui.heading("Stream Config");
+
+                            // sample rate drag value
+                            match self.state {
+                                State::Stopped => {
+                                    ui.add_enabled(
+                                        false,
+                                        egui::DragValue::new(&mut 0).prefix("Sample rate: "),
+                                    );
+                                }
+                                State::Selected {
+                                    ref mut stream_config,
+                                    ..
+                                } => {
+                                    ui.add(
+                                        egui::DragValue::new(&mut stream_config.sample_rate)
+                                            .prefix("Sample rate: "),
+                                    );
+                                }
+                                State::Streaming {
+                                    ref mut stream_config,
+                                    ..
+                                } => {
+                                    ui.add_enabled(
+                                        false,
+                                        egui::DragValue::new(&mut stream_config.sample_rate)
+                                            .prefix("Sample rate: "),
+                                    );
+                                }
                             }
-                        }
 
-                        ui.heading("Display settings");
+                            ui.add_space(10.0);
 
-                        ui.horizontal(|ui| {
-                            ui.label("Log scale base");
-                            ui.add(
-                                egui::DragValue::new(&mut self.log_scale.base)
-                                    .speed(0.1)
-                                    .range(2.0..=40.0),
-                            );
+                            match self.state {
+                                State::Stopped => {
+                                    ui.add_enabled(false, egui::Button::new("▶ Start"));
+                                }
+                                State::Selected {
+                                    ref device,
+                                    ref config_ranges,
+                                    stream_config,
+                                } => {
+                                    if ui.button("▶ Start").clicked() {
+                                        let data = Arc::new(Mutex::new(AllocRingBuffer::new(
+                                            stream_config.sample_rate as usize / 5
+                                                * stream_config.channels as usize,
+                                        )));
+
+                                        let data_ = data.clone();
+                                        let stream = device
+                                            .build_input_stream(
+                                                stream_config,
+                                                move |samples: &[f32], _| {
+                                                    data_.lock().extend(samples.iter().copied());
+                                                },
+                                                |error| {
+                                                    log::error!("Error in audio stream: {error:?}");
+                                                },
+                                                None,
+                                            )
+                                            .expect("Could not build input stream");
+
+                                        self.state = State::Streaming {
+                                            device: device.clone(),
+                                            config_ranges: config_ranges.clone(),
+                                            stream_config,
+                                            data: data.clone(),
+                                            stream,
+                                        };
+                                    }
+                                }
+                                State::Streaming {
+                                    ref device,
+                                    ref config_ranges,
+                                    stream_config,
+                                    ..
+                                } => {
+                                    if ui.button("⏹ Stop").clicked() {
+                                        self.state = State::Selected {
+                                            device: device.clone(),
+                                            config_ranges: config_ranges.clone(),
+                                            stream_config,
+                                        };
+                                    }
+                                }
+                            }
                         });
                     });
                 });
             });
-        });
 
-        ctx.request_repaint();
+        ui.request_repaint_after(std::time::Duration::from_millis(10));
     }
 }

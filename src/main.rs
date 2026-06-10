@@ -9,7 +9,12 @@ mod app;
 fn main() -> anyhow::Result<()> {
     simplelog::TermLogger::init(
         LevelFilter::Debug,
-        simplelog::Config::default(),
+        simplelog::ConfigBuilder::new()
+            .add_filter_ignore_str("tracing")
+            .add_filter_ignore_str("winit")
+            .add_filter_ignore_str("naga")
+            .add_filter_ignore_str("wgpu")
+            .build(),
         TerminalMode::Mixed,
         ColorChoice::Auto,
     )
