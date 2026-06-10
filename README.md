@@ -2,10 +2,9 @@
 
 # PulseSpectralyzer
 
-Spectrum Analyzer for PulseAudio
-
-(actually, it should work with any audio source that [cpal](https://crates.io/crates/cpal) supports)
+Audio Spectrum Analyzer written in Rust, originally for PulseAudio.
+It should work with any audio source that [cpal](https://crates.io/crates/cpal) supports (pulse, ALSA, pipewire, jack, ..)
 
 ## Preview
 
-https://github.com/Fabus1184/PulseSpectralyzer/assets/43907020/d655ef55-fca6-464a-be6b-c4220231fa07
+<img width="1673" height="743" alt="Screenshot From 2026-06-10 09-31-57" src="https://github.com/user-attachments/assets/60ca94c2-662a-4252-bfd3-7de985d4d779" />
